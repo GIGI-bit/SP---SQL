@@ -1,0 +1,313 @@
+--1. SP "Factorial". SP calculates the factorial of a given number. (5! = 1 * 2 * 3 * 4 * 5 = 120 ) 
+--(the factorial of a negative number does not exist).
+--1.  SP “Factorial”. SP verilən rəqəmin faktorialını hesablayır. (mənfi ədədin faktorialı olmur, nəzərə alın)
+
+CREATE PROC usp_Factorial
+	@num AS int
+AS
+BEGIN
+	IF @num < 0
+    BEGIN
+        PRINT 'Factorial of a negative number does not exist.';
+        RETURN;
+    END
+	DECLARE @factorial int=1;
+	WHILE @num !=0
+	BEGIN
+		SET @factorial =@num*@factorial
+		SET @num= @num-1
+	END
+ END
+
+--2. SP "Lazy Students." SP displays students who never took books in the library and through the output parameter returns the number of these students.
+--2. SP “Lazy Students”. SP heç vaxt kitab götürməyən tələbələri göstərir və output parametrlə bu tələbələrin sayını qaytarır
+
+ALTER PROC usp_lazyStudents
+	@counter int OUT
+AS
+BEGIN
+	SET NOCOUNT ON
+	SELECT Students.Id,FirstName,LastName
+	FROM  Students
+	WHERE Students.Id NOT IN (SELECT DISTINCT Id_Student FROM S_Cards);
+
+
+	SET @counter=@@ROWCOUNT
+END
+
+DECLARE @count int =0
+EXEC usp_lazyStudents @count OUT
+PRINT @count
+
+--3. SP "Books on the criteria." SP displays a list of books that matching criterion: the author's name, surname, subject, category. In addition, the list should be sorted by the column number specified in the 5th parameter, in the direction indicated in parameter 6. Columns: 1) book identifier, 2) book title, 3) surname and name of the author, 4) topic, 5) category.
+--3. SP "Books on the criteria". SP verilən kriteriyalara uygun olan kitapların listini göstərir : author name, surname , subject, category. Əlavə olaraq list verilən 5-ci parametrə görə sort olunmalıdır, 6cı parametrdə isə hansı istiqamətdə sort olunacağı qeyd olunur.
+--5ci parametr üçün göndərilə biləcək rəqəmlər (sütunlar) : 1) book identifier, 2) book title, 3) surname and name of the author, 4) topic, 5) category.
+
+CREATE PROC usp_BookCriteria
+	@authorName AS nvarchar(20),
+	@authorSurname AS nvarchar(20),
+	@subject AS nvarchar(20),
+	@category AS nvarchar(20),
+	@sort AS int,
+	@sortType AS nvarchar(4)
+AS
+BEGIN
+    DECLARE @OrderBy NVARCHAR(100);
+    IF @sort = 1
+        SET @OrderBy = 'Books.Id';
+    ELSE IF @sort = 2
+        SET @OrderBy = 'Books.[Name]';
+    ELSE IF @sort = 3
+        SET @OrderBy = 'Authors.LastName, Authors.FirstName';
+    ELSE IF @sort = 4
+        SET @OrderBy = 'Theme.[Name]';
+    ELSE IF @sort = 5
+        SET @OrderBy = 'Categories.[Name]';
+
+	SELECT Books.[Name],Pages
+	FROM Books
+	RIGHT JOIN Authors ON Books.Id_Author=Authors.Id
+	RIGHT JOIN Categories ON Books.Id_Category=Categories.Id
+	RIGHT JOIN Themes ON Books.Id_Themes=Themes.Id
+	WHERE Authors.FirstName=@authorName AND Authors.LastName=@authorSurname AND Themes.[Name]=@subject AND Categories.[Name]=@category
+	GROUP BY Books.[Name],Pages
+END
+
+
+--4. SP "Adding a student." SP adds a student and a group. If the group with this name exists, specify the Id of the group in Id_Group. If this name does not exist: first add the group and then the student. Note that the group names are stored in uppercase, but no one guarantees that the user will give the name in uppercase.
+--4. SP "Adding a student". SP tələbə və grup əlavə edir. Əgər eyni adlı qrup varsa, bu halda Tələbənin İd_Group sütununa həmin köhnə qrupun İd-si yazılır. Əgər qrup adı yoxdursa onda ilkin olaraq grup daha sonra tələbə əlavə olunur. Əlavə olaraq nəzərə alın ki grup adları UPPERCASE ilə verilənlər bazasında saxlanılır, amma heç kim zəmanət vermir ki, Procedure çağıran şəxs onu UPPERCASE göndərəcək. 
+
+CREATE PROC usp_addStudent
+	@GroupId AS INT,
+	@GroupName AS nvarchar(20),
+	@facultyName AS nvarchar(25),
+	@studentId AS INT,
+	@StudentName as nvarchar(20),
+	@StudentSurname AS nvarchar(20)
+AS
+BEGIN
+	SELECT @GroupId = Groups.Id
+    FROM Groups
+    WHERE UPPER(Groups.[Name]) = UPPER(@GroupName);
+
+	IF @GroupId IS NULL
+		SELECT @GroupId= COUNT(Id)+2
+		FROM Groups
+
+		INSERT INTO Groups (Id,[Name]) VALUES (@GroupId,UPPER(@GroupName))
+
+	INSERT INTO Students (Id,FirstName,LastName) VALUES (@studentId,@StudentName,@StudentSurname)
+	
+END
+--5. SP "Purchase of popular books." SP chooses the top 5 most popular books (among students and teachers simultaneously) and buys another 3 copies of every book.
+--5. SP "Purchase of popular books". SP təəbələr və müəlimlər arasında (eyni zamanda) məşhur olan 5 kitabı tapır, və o kitabların hər birindən 3 ədəd alır.
+
+CREATE PROC usp_popularBook
+AS
+BEGIN
+
+	UPDATE Books
+	Set Quantity+=3
+	WHERE Books.Id In(	SELECT TOP 5 Books.Id FROM Books
+	INNER JOIN S_Cards ON S_Cards.Id_Book=Books.Id
+	INNER JOIN T_Cards ON T_Cards.Id_Book=Books.Id
+	GROUP BY Books.Id
+	ORDER BY COUNT(*) DESC)
+END
+
+SELECT TOP 5 COUNT(*) [Total],Books.Id, [Name],Pages,Quantity FROM Books
+	INNER JOIN S_Cards ON S_Cards.Id_Book=Books.Id
+	INNER JOIN T_Cards ON T_Cards.Id_Book=Books.Id
+	GROUP BY Books.Id, [Name],Pages,Quantity
+	ORDER BY [Total] DESC
+
+EXEC usp_popularBook
+
+SELECT TOP 5 COUNT(*) [Total],Books.Id, [Name],Pages,Quantity FROM Books
+	INNER JOIN S_Cards ON S_Cards.Id_Book=Books.Id
+	INNER JOIN T_Cards ON T_Cards.Id_Book=Books.Id
+	GROUP BY Books.Id, [Name],Pages,Quantity
+	ORDER BY [Total] DESC
+
+--6. SP "Getting rid of unpopular books." SP chooses top 5 non-popular books and gives half to another educational institution.
+--6. SP "Getting rid of unpopular books". SP 5 popular olmayan kitabları seçir və onların yarısını başqa təhsil müəsisəsinə verir.
+
+CREATE PROC usp_UnpopularBooks
+AS
+BEGIN
+	CREATE TABLE TempBooks(Book_Id int)
+
+INSERT INTO TempBooks(Book_Id)
+SELECT Id
+FROM Books
+WHERE Id NOT IN( 
+		SELECT DISTINCT Id_book
+        FROM S_Cards
+        UNION
+        SELECT DISTINCT Id_book
+        FROM T_Cards
+		)
+
+UPDATE Books
+SET Quantity /=2
+WHERE Books.Id IN (SELECT Book_Id FROM TempBooks)
+
+DROP TABLE TempBooks
+END
+
+EXEC usp_UnpopularBooks
+
+--7. SP "A student takes a book." SP gets Id of a student and Id of a book. Check the quantity of books in table Books (if quantity > 0). Check how many books a student has now. If there are 3-4 books, then we issue a warning, and if there are already 5 books, then we do not give him a new book. If a student can take this book, then add rows in table S_Cards and update column quantity in table Books.
+
+ALTER PROC usp_borrowedBooks
+	@BookId AS int,
+	@StudentId AS int
+AS 
+BEGIN
+ DECLARE @quantityCheck int
+    SELECT @quantityCheck = Quantity
+    FROM Books
+    WHERE Id = @BookId
+
+    IF @quantityCheck IS NOT NULL AND @quantityCheck > 0
+    BEGIN
+        DECLARE @studentBooks int
+        SELECT @studentBooks = COUNT(*)
+        FROM S_Cards
+        WHERE S_Cards.Id_Student = @StudentId
+
+        IF @studentBooks >= 5
+        BEGIN
+            PRINT 'This student already has 5 books.'
+        END
+        ELSE
+        BEGIN
+		DECLARE @idCount int
+			SELECT @idCount=Id FROM S_Cards GROUP BY Id ORDER BY Id ASC
+
+            INSERT INTO S_Cards (Id,Id_Student, Id_Book, DateOut,Id_Lib)
+            VALUES (@idCount+1, @StudentId, @BookId, GETDATE(),2)
+            UPDATE Books
+            SET Quantity -= 1
+            WHERE Id = @BookId
+
+            PRINT 'Student can take the Book'
+        END
+    END
+    ELSE
+    BEGIN
+        PRINT 'Books are finished.';
+    END
+END
+
+Select * from S_Cards
+INNER JOIN Books ON Books.Id=S_Cards.Id_Book
+exec usp_borrowedBooks 1,2
+Select * from S_Cards
+INNER JOIN Books ON Books.Id=S_Cards.Id_Book
+
+--8. SP "Teacher takes the book."
+CREATE PROC usp_borrowedBooksT
+	@BookId AS int,
+	@TeacherId AS int
+AS 
+BEGIN
+ DECLARE @quantityCheck int
+    SELECT @quantityCheck = Quantity
+    FROM Books
+    WHERE Id = @BookId
+
+    IF @quantityCheck IS NOT NULL AND @quantityCheck > 0
+    BEGIN
+        DECLARE @teacherBooks int
+        SELECT @teacherBooks = COUNT(*)
+        FROM S_Cards
+        WHERE S_Cards.Id_Student = @TeacherId
+
+        IF @teacherBooks >= 5
+        BEGIN
+            PRINT 'This student already has 5 books.'
+        END
+        ELSE
+        BEGIN
+		DECLARE @idCount int
+			SELECT @idCount=Id FROM T_Cards GROUP BY Id ORDER BY Id ASC
+
+            INSERT INTO T_Cards (Id,Id_Teacher, Id_Book, DateOut,Id_Lib)
+            VALUES (@idCount+1, @TeacherId, @BookId, GETDATE(),2)
+            UPDATE Books
+            SET Quantity -= 1
+            WHERE Id = @BookId
+
+            PRINT 'Student can take the Book'
+        END
+    END
+    ELSE
+    BEGIN
+        PRINT 'Books are finished.';
+    END
+END
+select * from Teachers
+
+
+Select * from T_Cards
+INNER JOIN Books ON Books.Id=T_Cards.Id_Book
+exec usp_borrowedBooksT 18,10
+Select * from T_Cards
+INNER JOIN Books ON Books.Id=T_Cards.Id_Book
+
+--9. SP "The student returns the book." SP receives Student's Id and Book's Id. In the table S_Cards information is entered about the return of the book. Also you need to add quantity in table Books. If the student has kept the book for more than a year, then he is fined.
+
+CREATE PROC usp_bookReturnS
+	@BookId AS int,
+	@StudentId AS int 
+AS
+BEGIN
+	UPDATE S_Cards
+	SET DateIn=GETDATE()
+	WHERE S_Cards.Id_Student=@StudentId AND S_Cards.Id_Book=@BookId
+	UPDATE Books
+	SET Quantity+=1
+	WHERE Books.Id=@BookId
+
+	DECLARE @dateDiff int
+	SELECT @dateDiff= DATEDIFF(year,DateOut,DateIn)FROM S_Cards
+	WHERE Id_Student=@StudentId AND Id_Book=@BookId
+
+	IF @dateDiff>1
+	BEGIN
+	PRINT 'You have kept the book for way too long! You must pay 200 USD'
+	END
+
+END
+
+Select * from S_Cards
+INNER JOIN Books ON Books.Id=S_Cards.Id_Book
+exec usp_bookReturnS 1,2
+Select * from S_Cards
+INNER JOIN Books ON Books.Id=S_Cards.Id_Book
+
+--10. SP "Teacher returns book".
+
+CREATE PROC usp_bookReturnT
+	@BookId AS int,
+	@TeacherId AS int 
+AS
+BEGIN
+	UPDATE T_Cards
+	SET DateIn=GETDATE()
+	WHERE T_Cards.Id_Teacher=@TeacherId AND T_Cards.Id_Book=@BookId
+	UPDATE Books
+	SET Quantity+=1
+	WHERE Books.Id=@BookId
+
+	DECLARE @dateDiff int
+	SELECT @dateDiff= DATEDIFF(year,DateOut,DateIn)FROM T_Cards
+	WHERE Id_Teacher=@TeacherId AND Id_Book=@BookId
+
+	IF @dateDiff>1
+	BEGIN
+	PRINT 'You have kept the book for way too long! You must pay 200 USD'
+	END
+
+END
